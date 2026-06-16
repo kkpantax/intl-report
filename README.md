@@ -1,4 +1,4 @@
-# 國際交流成效回報系統（起手包）
+# 國際交流成效回報系統
 
 Next.js (App Router) + Supabase。填報端免登入、後台 Supabase Auth。
 
