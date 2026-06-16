@@ -1,41 +1,36 @@
-// 入口：卡片選學院（依校區分組）。Server Component。
+// 入口：兩個入口（各系填報 / 國際事務處）。Server Component。
 import Link from "next/link";
-import { supabaseAdmin, getOpenPeriod } from "@/lib/supabaseAdmin";
-import type { Unit } from "@/lib/types";
+import { getOpenPeriod } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const period = await getOpenPeriod();
-  const { data: units } = await supabaseAdmin.from("units").select("*").order("sort_order");
-  const list = (units ?? []) as Unit[];
-  const campuses = ["台北", "高雄"];
 
   return (
-    <div>
-      <div className="mb-4 text-sm text-gray-600">
-        目前期別：<span className="font-semibold">{period?.name ?? "（尚未開放）"}</span>
+    <div className="max-w-3xl mx-auto">
+      <div className="text-center mb-10 mt-4">
+        <h1 className="text-2xl md:text-3xl font-bold text-navy">實踐大學國際交流成效回報系統</h1>
+        <p className="text-sm text-gray-500 mt-2">
+          目前期別：<span className="font-semibold">{period?.name ?? "（尚未開放）"}</span>
+        </p>
       </div>
-      <h1 className="text-xl font-bold mb-4">請選擇學院</h1>
-      {campuses.map((c) => {
-        const colleges = Array.from(new Set(list.filter((u) => u.campus === c).map((u) => u.college)));
-        return (
-          <section key={c} className="mb-8">
-            <h2 className="text-navy font-semibold mb-3">{c}校區</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {colleges.map((col) => (
-                <Link key={col} href={`/college/${encodeURIComponent(col)}`}
-                  className="block rounded-xl border bg-white p-5 shadow-sm hover:shadow-md hover:border-navy transition">
-                  <div className="text-lg font-semibold">{col}</div>
-                  <div className="text-sm text-gray-500 mt-1">
-                    {list.filter((u) => u.college === col).length} 個系所
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Link href="/report"
+          className="block rounded-2xl border bg-white p-8 shadow-sm hover:shadow-md hover:border-navy transition text-center">
+          <div className="text-4xl mb-3">📝</div>
+          <div className="text-xl font-bold">各系填報登入</div>
+          <div className="text-sm text-gray-500 mt-2">各系所進入填報本期國際交流成效</div>
+        </Link>
+
+        <Link href="/admin"
+          className="block rounded-2xl border bg-white p-8 shadow-sm hover:shadow-md hover:border-navy transition text-center">
+          <div className="text-4xl mb-3">🏛️</div>
+          <div className="text-xl font-bold">國際事務處登入</div>
+          <div className="text-sm text-gray-500 mt-2">後台彙整、退回、匯出與系統管理</div>
+        </Link>
+      </div>
     </div>
   );
 }
