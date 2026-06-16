@@ -39,7 +39,7 @@ export default async function CollegePage({ params }: { params: { college: strin
 
   return (
     <div>
-      <Link href="/" className="text-sm text-navy">← 回學院選單</Link>
+      <Link href="/report" className="text-sm text-navy">← 回學院選單</Link>
       <h1 className="text-xl font-bold mt-2 mb-1">{college}</h1>
       <div className="text-sm text-gray-500 mb-4">{period?.name} ・ 學院彙整檢視（唯讀）</div>
 

@@ -10,7 +10,7 @@ export default async function DeptPage({ params }: { params: { unitId: string } 
   const unitId = Number(params.unitId);
   const period = await getOpenPeriod();
   const { data: unit } = await supabaseAdmin.from("units").select("*").eq("id", unitId).single();
-  if (!unit) return <div>找不到此系所。<Link href="/" className="text-navy underline">回首頁</Link></div>;
+  if (!unit) return <div>找不到此系所。<Link href="/report" className="text-navy underline">回學院選單</Link></div>;
 
   const { data: acts } = await supabaseAdmin.from("activities").select("*")
     .eq("unit_id", unitId).eq("period_id", period?.id ?? -1)
