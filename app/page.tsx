@@ -1,6 +1,7 @@
 // 入口：兩個入口（各系填報 / 國際事務處）。Server Component。
 import Link from "next/link";
 import { getOpenPeriod } from "@/lib/supabaseAdmin";
+import SiteFooter from "@/components/SiteFooter";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,8 @@ export default async function Home() {
           <div className="text-sm text-gray-500 mt-2">後台彙整、退回、匯出與系統管理</div>
         </Link>
       </div>
+
+      <SiteFooter />
     </div>
   );
 }

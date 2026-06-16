@@ -26,3 +26,13 @@
 5. **學院頁存取**：目前免登入唯讀（符合規格）；若日後要限制，可加學院代碼。
 6. **UI 美化**：套用學校配色/字體；目前為功能性 Tailwind。
 7. **稽核**：activities 已記 reporter；如需修改紀錄可加 audit log。
+
+## 版本與變更紀錄規則（每次改程式都要做）
+每當修改本專案程式碼，負責修改的一方（包含 Claude Code）必須在同一次變更裡：
+1. 依語意化版本 SemVer 判斷本次等級，並更新 lib/version.ts 的 APP_VERSION：
+   - patch（x.x.+1）：修錯字、修 bug、樣式微調。
+   - minor（x.+1.0）：新增功能或欄位，且向下相容。
+   - major（+1.0.0）：不相容的重大改版、資料結構或流程的破壞性變更。
+   判斷依據是本次實際改了什麼、從使用者/承辦角度看的影響大小。
+2. 在 CHANGELOG.md 最上方新增該版本條目（標日期，分類用 Added/Changed/Fixed/Removed）。
+3. APP_VERSION 與 CHANGELOG 的版本號必須一致。使用者不需手動改版本號。
