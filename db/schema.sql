@@ -1,0 +1,147 @@
+-- =====================================================================
+-- 國際交流成效回報系統  Schema (Supabase / Postgres)
+-- 在 Supabase SQL Editor 一次貼上執行即可。
+-- 安全模型：填報端「免登入」，所有讀寫由 Next.js 後端 API 以 service_role
+--           執行（繞過 RLS）；瀏覽器拿不到任何資料表的直接權限。
+--           只有國際處 admin 透過 Supabase Auth 登入。
+-- =====================================================================
+
+-- ---------- 期別 ----------
+create table if not exists periods (
+  id          bigint generated always as identity primary key,
+  name        text        not null,                 -- 例：115年1-6月
+  start_date  date        not null,
+  end_date    date        not null,
+  is_open     boolean     not null default false,    -- 是否開放填報（同時間建議只開一期）
+  created_at  timestamptz not null default now()
+);
+
+-- ---------- 單位（學院 / 系所）----------
+create table if not exists units (
+  id          bigint primary key,                    -- 固定 id，用於系所專屬連結
+  campus      text not null check (campus in ('台北','高雄')),
+  college     text not null,                          -- 學院
+  department  text not null,                          -- 系所
+  sort_order  int  not null default 0
+);
+
+-- ---------- 活動明細（一活動一列）----------
+create table if not exists activities (
+  id          uuid primary key default gen_random_uuid(),
+  period_id   bigint not null references periods(id) on delete cascade,
+  unit_id     bigint not null references units(id)   on delete cascade,
+  degree      text   not null check (degree in ('學士','碩士','博士','碩士在職專班')),
+  category    text   not null check (category in ('出國交流','研討會工作營工作坊')),
+  activity_type text not null,                        -- 9 種類型之一（見 lib/constants.ts）
+  title       text   not null,                        -- 活動名稱
+  start_date  date,
+  end_date    date,
+  country     text,                                   -- 國家/地區
+  headcount   int    not null default 0 check (headcount >= 0),  -- 參與人數（純數字）
+  note        text,                                   -- 備註
+  reporter    text   not null,                         -- 填報人姓名（取代登入身分）
+  ext         text,                                    -- 分機
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists idx_activities_period_unit on activities(period_id, unit_id);
+
+-- ---------- 送出狀態（系 × 期別）----------
+create table if not exists submissions (
+  id           uuid primary key default gen_random_uuid(),
+  period_id    bigint not null references periods(id) on delete cascade,
+  unit_id      bigint not null references units(id)   on delete cascade,
+  status       text   not null default 'draft' check (status in ('draft','submitted','returned')),
+  no_activity  boolean not null default false,         -- 申報「本期無活動」
+  submitted_by text,                                   -- 送出人姓名
+  submitted_at timestamptz,
+  updated_at   timestamptz not null default now(),
+  unique (period_id, unit_id)
+);
+
+-- ---------- 自動更新 updated_at ----------
+create or replace function touch_updated_at() returns trigger as $$
+begin new.updated_at = now(); return new; end; $$ language plpgsql;
+drop trigger if exists trg_activities_touch on activities;
+create trigger trg_activities_touch before update on activities
+  for each row execute function touch_updated_at();
+drop trigger if exists trg_submissions_touch on submissions;
+create trigger trg_submissions_touch before update on submissions
+  for each row execute function touch_updated_at();
+
+-- ---------- 三指標彙總視圖（依 期別 × 系所）----------
+-- 只彙總「有活動」的列；前端/後端再左接 units 清單以顯示 0。
+create or replace view v_activity_metrics as
+select
+  a.period_id,
+  a.unit_id,
+  coalesce(sum(a.headcount) filter (where a.category = '出國交流'), 0)             as outbound_pax,    -- 出國交流人次
+  count(*)               filter (where a.category = '研討會工作營工作坊')           as conf_sessions,   -- 研討會/工作營/工作坊 場次
+  coalesce(sum(a.headcount) filter (where a.category = '研討會工作營工作坊'), 0)   as conf_pax         -- 研討會/工作營/工作坊 人數
+from activities a
+group by a.period_id, a.unit_id;
+
+-- =====================================================================
+-- RLS：資料表全部開啟、且不給 anon / authenticated 任何政策 =>
+--      預設拒絕。service_role（後端 API）會繞過 RLS。
+--      admin 的資料讀取也走後端 API；若你要讓 admin 前端直接讀，
+--      再針對 authenticated 加 SELECT policy 即可。
+-- =====================================================================
+alter table periods     enable row level security;
+alter table units       enable row level security;
+alter table activities  enable row level security;
+alter table submissions enable row level security;
+
+-- =====================================================================
+-- 預設期別
+-- =====================================================================
+insert into periods (name, start_date, end_date, is_open)
+values ('115年1-6月', '2026-01-01', '2026-06-30', true);
+
+-- =====================================================================
+-- 單位種子資料（沿用去年清單，含台北＋高雄，國際事務處為行政單位）
+-- =====================================================================
+insert into units (id, campus, college, department, sort_order) values
+ (1 ,'台北','民生學院','餐飲管理學系',101),
+ (2 ,'台北','民生學院','餐飲產業創新碩士班',102),
+ (3 ,'台北','民生學院','社會工作學系',103),
+ (4 ,'台北','民生學院','音樂學系',104),
+ (5 ,'台北','民生學院','家庭研究與兒童發展學系',105),
+ (6 ,'台北','民生學院','食品營養與保健生技學系',106),
+ (7 ,'台北','法學院','法律學系',201),
+ (8 ,'台北','設計學院','工業產品設計學系',301),
+ (9 ,'台北','設計學院','建築設計學系',302),
+ (10,'台北','設計學院','建築職人學士學位學程',303),
+ (11,'台北','設計學院','媒體傳達設計學系',304),
+ (12,'台北','設計學院','服裝設計學系',305),
+ (13,'台北','管理學院','管理學院創意產業博士班',401),
+ (14,'台北','管理學院','企業管理學系',402),
+ (15,'台北','管理學院','資訊科技與管理學系',403),
+ (16,'台北','管理學院','財務金融學系',404),
+ (17,'台北','管理學院','風險管理與保險學系',405),
+ (18,'台北','管理學院','國際經營與貿易學系',406),
+ (19,'台北','管理學院','會計學系',407),
+ (20,'台北','管理學院','應用外語學系',408),
+ (21,'台北','國際學程','智慧服務管理英語學士學位學程',501),
+ (22,'台北','國際學程','國際企業英語學士學位學程',502),
+ (23,'台北','國際學程','國際企業英語碩士學位學程',503),
+ (24,'台北','行政單位','國際事務處',601),
+ (25,'高雄','商資學院','資訊科技與通訊學系',701),
+ (26,'高雄','商資學院','數位多媒體遊戲設計學系',702),
+ (27,'高雄','商資學院','資訊管理學系',703),
+ (28,'高雄','商資學院','行銷管理學系',704),
+ (29,'高雄','商資學院','金融管理學系',705),
+ (30,'高雄','商資學院','國際企業管理學系',706),
+ (31,'高雄','商資學院','會計暨稅務學系',707),
+ (32,'高雄','商資學院','國際貿易學系',708),
+ (33,'高雄','商資學院','電腦動畫學士學位學程',709),
+ (34,'高雄','商資學院','東南亞智慧商務學士學位學程',710),
+ (35,'高雄','商資學院','視覺特效學士學位學程',711),
+ (36,'高雄','文創學院','服飾設計與經營學系',801),
+ (37,'高雄','文創學院','時尚設計學系',802),
+ (38,'高雄','文創學院','觀光管理學系',803),
+ (39,'高雄','文創學院','休閒產業管理學系',804),
+ (40,'高雄','文創學院','應用日文學系',805),
+ (41,'高雄','文創學院','應用中文學系',806),
+ (42,'高雄','文創學院','應用英語學系',807)
+on conflict (id) do nothing;

@@ -1,0 +1,4 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+body { background:#f6f7f9; color:#1a1a1a; font-family: "Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif; }
