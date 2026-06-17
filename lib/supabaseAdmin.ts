@@ -6,8 +6,10 @@ export const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 export async function getOpenPeriod() {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('periods').select('*').eq('is_open', true)
     .order('id', { ascending: false }).limit(1).maybeSingle();
+  // 區分「查詢失敗」與「沒有開放期別」：失敗要拋出，不能靜默回 null 害下游把期別當 -1、各系誤判為「填報中」
+  if (error) throw new Error(`讀取開放期別失敗：${error.message}`);
   return data;
 }

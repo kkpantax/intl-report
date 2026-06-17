@@ -16,8 +16,10 @@ export async function GET(req: NextRequest) {
 
   const { data: groupMetrics } = await supabaseAdmin.from("v_unit_group_metrics").select("*")
     .eq("period_id", period?.id ?? -1).in("unit_id", unitIds.length ? unitIds : [-1]);
-  const { data: subs } = await supabaseAdmin.from("submissions").select("*")
+  const { data: subs, error: subsErr } = await supabaseAdmin.from("submissions").select("*")
     .eq("period_id", period?.id ?? -1).in("unit_id", unitIds.length ? unitIds : [-1]);
+  // 讀取失敗回 500，前端 (CollegeClient) 會保留上一份正確資料，不會把已送出的系所洗成「填報中」
+  if (subsErr) return NextResponse.json({ error: subsErr.message }, { status: 500 });
 
   const indicators = deriveIndicators(await getActiveMetricGroups());
 

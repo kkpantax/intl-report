@@ -18,8 +18,10 @@ export default async function CollegePage({ params }: { params: { college: strin
 
   const { data: gmRaw } = await supabaseAdmin.from("v_unit_group_metrics").select("*")
     .eq("period_id", period?.id ?? -1).in("unit_id", unitIds.length ? unitIds : [-1]);
-  const { data: subsRaw } = await supabaseAdmin.from("submissions").select("*")
+  const { data: subsRaw, error: subsErr } = await supabaseAdmin.from("submissions").select("*")
     .eq("period_id", period?.id ?? -1).in("unit_id", unitIds.length ? unitIds : [-1]);
+  // 送出狀態讀取失敗時要拋出，否則 subsRaw 變空陣列，已送出的系所會被誤標為「填報中」
+  if (subsErr) throw new Error(`讀取送出狀態失敗：${subsErr.message}`);
 
   const indicators = deriveIndicators(await getActiveMetricGroups());
 
