@@ -12,6 +12,10 @@
 ## [Unreleased]
 （尚未發布、開發中的變更先記在這裡）
 
+## [1.3.1] - 2026-06-18
+### 變更 Changed
+- 後台「選項管理」四個區塊顯示順序調整為：學制 → 指標歸組 → 活動大類 → 活動類型（僅調整 JSX 區塊順序，邏輯、API、DB 不變）。
+
 ## [1.3.0] - 2026-06-18
 ### 新增 Added
 - 公開 repo 前的安全把關：`scripts/security-check.mjs`（零相依密鑰掃描）、`.husky/pre-commit`（每次 commit 跑無 `--strict`，CRITICAL 才擋）、GitHub Actions `.github/workflows/security.yml`（push／PR 跑 `--strict` ＋ gitleaks 掃整個 git 歷史）、`SECURITY.md` 安全說明與公開前清單、`.env.example` 環境變數範本。`package.json` 新增 `security-check` script。

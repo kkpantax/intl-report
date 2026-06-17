@@ -444,6 +444,27 @@ function Options({ token }: { token: string }) {
       {msg && <p className="text-red-500 text-sm">{msg}</p>}
       <p className="text-xs text-gray-500">「停用」的項目不會再出現在填報下拉，但既有活動仍保留原值。項目名稱建立後不可修改（以維持歷史紀錄）。</p>
 
+      {/* 學制 */}
+      <section>
+        <h2 className="font-semibold mb-2">學制</h2>
+        <div className="flex flex-wrap gap-2 items-center mb-3">
+          <input className="border rounded p-2 text-sm" placeholder="新學制名稱" value={nd.value} onChange={(e)=>setNd({...nd,value:e.target.value})} />
+          <input className="border rounded p-2 text-sm w-24" placeholder="排序" value={nd.sort_order} onChange={(e)=>setNd({...nd,sort_order:e.target.value})} />
+          <button onClick={async()=>{ if(await add("degree", nd)) setNd({value:"",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增學制</button>
+        </div>
+        <OptTable rows={degrees} cols={["名稱","排序","狀態",""]}>
+          {(o:any)=>(<>
+            <td className="p-2">{o.value}</td>
+            <td className="p-2 text-center"><input className="border rounded p-1 w-16 text-center" value={o.sort_order} onChange={(e)=>edit(o.id,"sort_order",e.target.value)} /></td>
+            <td className="p-2 text-center">{o.active ? <span className="text-green-700">啟用中</span> : <span className="text-gray-400">已停用</span>}</td>
+            <td className="p-2 text-center whitespace-nowrap">
+              <button onClick={()=>patch({id:o.id,sort_order:Number(o.sort_order)})} className="text-navy mr-3">儲存</button>
+              <button onClick={()=>patch({id:o.id,active:!o.active})} className={o.active?"text-red-600":"text-green-700"}>{o.active?"停用":"啟用"}</button>
+            </td>
+          </>)}
+        </OptTable>
+      </section>
+
       {/* 指標歸組 */}
       <section>
         <h2 className="font-semibold mb-2">指標歸組</h2>
@@ -465,27 +486,6 @@ function Options({ token }: { token: string }) {
           </>)}
         </OptTable>
         <p className="text-xs text-gray-400 mt-2">指標歸組決定統計欄位：新增的歸組為「人次」統計（人數加總），會新增一欄「〔名稱〕人次」並顯示於填報、學院、後台與 Excel。內建「出國交流」「研討會類」維持原計算方式。停用會讓對應指標欄位隱藏，指向它的大類請改設其它歸組。</p>
-      </section>
-
-      {/* 學制 */}
-      <section>
-        <h2 className="font-semibold mb-2">學制</h2>
-        <div className="flex flex-wrap gap-2 items-center mb-3">
-          <input className="border rounded p-2 text-sm" placeholder="新學制名稱" value={nd.value} onChange={(e)=>setNd({...nd,value:e.target.value})} />
-          <input className="border rounded p-2 text-sm w-24" placeholder="排序" value={nd.sort_order} onChange={(e)=>setNd({...nd,sort_order:e.target.value})} />
-          <button onClick={async()=>{ if(await add("degree", nd)) setNd({value:"",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增學制</button>
-        </div>
-        <OptTable rows={degrees} cols={["名稱","排序","狀態",""]}>
-          {(o:any)=>(<>
-            <td className="p-2">{o.value}</td>
-            <td className="p-2 text-center"><input className="border rounded p-1 w-16 text-center" value={o.sort_order} onChange={(e)=>edit(o.id,"sort_order",e.target.value)} /></td>
-            <td className="p-2 text-center">{o.active ? <span className="text-green-700">啟用中</span> : <span className="text-gray-400">已停用</span>}</td>
-            <td className="p-2 text-center whitespace-nowrap">
-              <button onClick={()=>patch({id:o.id,sort_order:Number(o.sort_order)})} className="text-navy mr-3">儲存</button>
-              <button onClick={()=>patch({id:o.id,active:!o.active})} className={o.active?"text-red-600":"text-green-700"}>{o.active?"停用":"啟用"}</button>
-            </td>
-          </>)}
-        </OptTable>
       </section>
 
       {/* 活動大類 */}
