@@ -1,21 +1,21 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { METRIC_LABELS } from "@/lib/constants";
 import type { OptionSet } from "@/lib/options";
+import type { Indicator } from "@/lib/metrics";
 import type { Unit, Activity, Submission, Period } from "@/lib/types";
 import CountryCombobox from "@/components/CountryCombobox";
 
-export default function DeptClient({ unit, period, initialActivities, initialSubmission, options }:{
+export default function DeptClient({ unit, period, initialActivities, initialSubmission, options, indicators }:{
   unit: Unit; period: Period | null; initialActivities: Activity[]; initialSubmission: Submission | null;
-  options: OptionSet;
+  options: OptionSet; indicators: Indicator[];
 }) {
   // 由後台選項建立預設值與對應表
   const degrees = options.degrees;
   const categories = options.categories;
   const typesByCategory = options.typesByCategory;
   const catGroup = useMemo(() => {
-    const m: Record<string, "outbound" | "conference"> = {};
+    const m: Record<string, string> = {};
     categories.forEach((c) => (m[c.value] = c.metric_group));
     return m;
   }, [categories]);
@@ -58,11 +58,20 @@ export default function DeptClient({ unit, period, initialActivities, initialSub
   }, [unit.id]);
 
   const locked = sub?.status === "submitted";
-  const metrics = useMemo(() => acts.reduce((a, x) => {
-    if ((catGroup[x.category] ?? "conference") === "outbound") a.outbound_pax += x.headcount;
-    else { a.conf_sessions += 1; a.conf_pax += x.headcount; }
-    return a;
-  }, { outbound_pax: 0, conf_sessions: 0, conf_pax: 0 }), [acts, catGroup]);
+  // 依動態指標歸組計算本系小計：每個歸組的場次（筆數）與人次（人數加總）。
+  const indicatorValues = useMemo(() => {
+    const agg: Record<string, { sessions: number; pax: number }> = {};
+    for (const x of acts) {
+      const g = catGroup[x.category] ?? "conference";
+      (agg[g] ??= { sessions: 0, pax: 0 });
+      agg[g].sessions += 1;
+      agg[g].pax += x.headcount;
+    }
+    return indicators.map((ind) => {
+      const v = agg[ind.groupKey];
+      return { ind, value: v ? (ind.kind === "sessions" ? v.sessions : v.pax) : 0 };
+    });
+  }, [acts, catGroup, indicators]);
 
   if (!period) return <div>目前未開放填報。</div>;
 
@@ -144,11 +153,11 @@ export default function DeptClient({ unit, period, initialActivities, initialSub
       </div>
       <div className="text-sm text-gray-500 mb-4">{period.name} ・ 填報人：{reporter}</div>
 
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        {(["outbound_pax", "conf_sessions", "conf_pax"] as const).map((k) => (
-          <div key={k} className="rounded-xl bg-white border p-4">
-            <div className="text-xs text-gray-500">{METRIC_LABELS[k]}</div>
-            <div className="text-2xl font-bold text-navy">{metrics[k]}</div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        {indicatorValues.map(({ ind, value }) => (
+          <div key={ind.id} className="rounded-xl bg-white border p-4">
+            <div className="text-xs text-gray-500">{ind.label}</div>
+            <div className="text-2xl font-bold text-navy">{value}</div>
           </div>
         ))}
       </div>

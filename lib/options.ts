@@ -2,9 +2,9 @@
 // 若 options 表尚未建立或為空，退回 lib/constants 的預設值，確保系統在遷移前仍可運作。
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { DEGREES, CATEGORIES, TYPES_BY_CATEGORY } from "@/lib/constants";
+import { FALLBACK_GROUPS, type MetricGroupDef } from "@/lib/metrics";
 
 export type OptionKind = "degree" | "category" | "type";
-export type MetricGroup = "outbound" | "conference";
 
 export type OptionRow = {
   id: number;
@@ -12,14 +12,14 @@ export type OptionRow = {
   value: string;
   label: string | null;
   parent: string | null;
-  metric_group: MetricGroup | null;
+  metric_group: string | null;   // 對應 metric_groups.key（可為任意自訂歸組）
   sort_order: number;
   active: boolean;
 };
 
 export type OptionSet = {
   degrees: { value: string; label: string }[];
-  categories: { value: string; label: string; metric_group: MetricGroup }[];
+  categories: { value: string; label: string; metric_group: string }[];
   typesByCategory: Record<string, string[]>;
 };
 
@@ -29,7 +29,7 @@ function fallback(): OptionSet {
     categories: CATEGORIES.map((c) => ({
       value: c.value,
       label: c.label,
-      metric_group: (c.value === "出國交流" ? "outbound" : "conference") as MetricGroup,
+      metric_group: c.value === "出國交流" ? "outbound" : "conference",
     })),
     typesByCategory: { ...TYPES_BY_CATEGORY },
   };
@@ -49,7 +49,7 @@ export async function getActiveOptions(): Promise<OptionSet> {
     const categories = rows.filter((r) => r.kind === "category").map((r) => ({
       value: r.value,
       label: r.label || r.value,
-      metric_group: (r.metric_group === "outbound" ? "outbound" : "conference") as MetricGroup,
+      metric_group: r.metric_group || "conference",
     }));
     const typesByCategory: Record<string, string[]> = {};
     for (const c of categories) typesByCategory[c.value] = [];
@@ -61,6 +61,19 @@ export async function getActiveOptions(): Promise<OptionSet> {
     return { degrees, categories, typesByCategory };
   } catch {
     return fallback();
+  }
+}
+
+// 取得啟用中的指標歸組（給填報/彙整顯示用）。表不存在或為空時退回內建兩組。
+export async function getActiveMetricGroups(): Promise<MetricGroupDef[]> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("metric_groups").select("*").eq("active", true)
+      .order("sort_order", { ascending: true });
+    if (error || !data || data.length === 0) return FALLBACK_GROUPS;
+    return data as MetricGroupDef[];
+  } catch {
+    return FALLBACK_GROUPS;
   }
 }
 

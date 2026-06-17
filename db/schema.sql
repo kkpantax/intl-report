@@ -66,13 +66,27 @@ create table if not exists options (
   value        text not null,                  -- 實際存入 activities 的字串（建立後不可改）
   label        text,                           -- 顯示文字（留空＝同 value）
   parent       text,                           -- 僅「活動類型」使用：所屬大類的 value
-  metric_group text check (metric_group in ('outbound','conference')), -- 僅「活動大類」使用：歸入哪組指標
+  metric_group text,                            -- 僅「活動大類」使用：對應 metric_groups.key
   sort_order   int  not null default 0,
   active       boolean not null default true,  -- 停用＝不再出現在填報下拉（保留以維持歷史對應）
   created_at   timestamptz not null default now()
 );
 create unique index if not exists uq_options_kind_value_parent
   on options(kind, value, coalesce(parent, ''));
+
+-- ---------- 指標歸組（後台可增刪；活動大類指向某歸組）----------
+create table if not exists metric_groups (
+  id             bigint generated always as identity primary key,
+  key            text not null unique,            -- options.metric_group 所存的值
+  label          text not null,                   -- 歸組顯示名稱
+  count_sessions boolean not null default false,  -- 是否計「場次」（活動筆數）
+  count_pax      boolean not null default true,   -- 是否計「人次」（人數加總）
+  sessions_label text,                            -- 場次指標顯示名稱（留空＝{label}場次）
+  pax_label      text,                            -- 人次指標顯示名稱（留空＝{label}人次）
+  sort_order     int not null default 0,
+  active         boolean not null default true,
+  created_at     timestamptz not null default now()
+);
 
 -- ---------- 自動更新 updated_at ----------
 create or replace function touch_updated_at() returns trigger as $$
@@ -84,20 +98,19 @@ drop trigger if exists trg_submissions_touch on submissions;
 create trigger trg_submissions_touch before update on submissions
   for each row execute function touch_updated_at();
 
--- ---------- 三指標彙總視圖（依 期別 × 系所）----------
--- 只彙總「有活動」的列；前端/後端再左接 units 清單以顯示 0。
--- 依大類的 metric_group 分組（支援自訂大類）；找不到對應大類時預設歸 conference。
-create or replace view v_activity_metrics as
+-- ---------- 各系 × 期別 × 指標歸組 的彙總（場次＝活動筆數、人次＝人數加總）----------
+-- 前端/後端依 metric_groups 推導指標欄位後，再左接 units 清單以顯示 0。
+create or replace view v_unit_group_metrics as
 select
   a.period_id,
   a.unit_id,
-  coalesce(sum(a.headcount) filter (where coalesce(c.metric_group,'conference') = 'outbound'), 0)    as outbound_pax, -- 出國交流人次
-  count(*)                  filter (where coalesce(c.metric_group,'conference') = 'conference')      as conf_sessions,-- 研討會/工作營/工作坊 場次
-  coalesce(sum(a.headcount) filter (where coalesce(c.metric_group,'conference') = 'conference'), 0)  as conf_pax,     -- 研討會/工作營/工作坊 人數
-  count(*)                                                                                           as act_count     -- 本期該系活動筆數（用於判斷「填報中」）
+  c.metric_group as group_key,
+  count(*)                     as sessions,
+  coalesce(sum(a.headcount),0) as pax
 from activities a
-left join options c on c.kind = 'category' and c.value = a.category
-group by a.period_id, a.unit_id;
+join options c on c.kind = 'category' and c.value = a.category
+where c.metric_group is not null
+group by a.period_id, a.unit_id, c.metric_group;
 
 -- =====================================================================
 -- RLS：資料表全部開啟、且不給 anon / authenticated 任何政策 =>
@@ -108,14 +121,23 @@ group by a.period_id, a.unit_id;
 alter table periods     enable row level security;
 alter table units       enable row level security;
 alter table activities  enable row level security;
-alter table submissions enable row level security;
-alter table options     enable row level security;
+alter table submissions   enable row level security;
+alter table options       enable row level security;
+alter table metric_groups enable row level security;
 
 -- =====================================================================
 -- 預設期別
 -- =====================================================================
 insert into periods (name, start_date, end_date, is_open)
 values ('115年1-6月', '2026-01-01', '2026-06-30', true);
+
+-- =====================================================================
+-- 指標歸組種子（內建兩組；後台可再新增）
+-- =====================================================================
+insert into metric_groups (key, label, count_sessions, count_pax, sessions_label, pax_label, sort_order) values
+ ('outbound',  '出國交流',                false, true, null,                      '出國交流人次',            1),
+ ('conference','研討會 / 工作營 / 工作坊',  true,  true, '研討會/工作營/工作坊場次', '研討會/工作營/工作坊人數', 2)
+on conflict (key) do nothing;
 
 -- =====================================================================
 -- 選項種子（學制 / 活動大類 / 活動類型）

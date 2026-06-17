@@ -7,7 +7,12 @@ import { requireAdmin } from "@/lib/requireAdmin";
 // 「刪除」一律以停用（active=false）處理，避免破壞既有活動與大類的指標歸組。
 
 const KINDS = ["degree", "category", "type"] as const;
-const GROUPS = ["outbound", "conference"] as const;
+
+async function isValidGroup(key: string | null | undefined): Promise<boolean> {
+  if (!key) return false;
+  const { data } = await supabaseAdmin.from("metric_groups").select("key").eq("key", key).maybeSingle();
+  return !!data;
+}
 
 export async function GET(req: NextRequest) {
   if (!(await requireAdmin(req))) return NextResponse.json({ error: "未授權" }, { status: 401 });
@@ -37,8 +42,8 @@ export async function POST(req: NextRequest) {
   }
   if (b.kind === "category") {
     metric_group = b.metric_group;
-    if (!(GROUPS as readonly string[]).includes(metric_group ?? ""))
-      return NextResponse.json({ error: "請選擇大類的指標歸組" }, { status: 400 });
+    if (!(await isValidGroup(metric_group)))
+      return NextResponse.json({ error: "請選擇有效的指標歸組" }, { status: 400 });
   }
 
   const sort_order = Number.isFinite(Number(b.sort_order)) && b.sort_order !== "" && b.sort_order != null
@@ -60,7 +65,7 @@ export async function PATCH(req: NextRequest) {
   const b = await req.json();
   if (!b.id) return NextResponse.json({ error: "缺 id" }, { status: 400 });
 
-  if ("metric_group" in b && b.metric_group != null && !(GROUPS as readonly string[]).includes(b.metric_group))
+  if ("metric_group" in b && b.metric_group != null && !(await isValidGroup(b.metric_group)))
     return NextResponse.json({ error: "指標歸組不合法" }, { status: 400 });
 
   // 僅允許更新顯示與行為欄位；value / kind / parent 不可改。

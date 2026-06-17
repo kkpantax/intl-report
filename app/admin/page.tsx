@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
-import { METRIC_LABELS, CAMPUSES } from "@/lib/constants";
+import { CAMPUSES } from "@/lib/constants";
+import { indicatorValue, unitActCount, type Indicator, type GroupMetricRow } from "@/lib/metrics";
 
 type Tab = "overview" | "accounts" | "units" | "periods" | "options";
 
@@ -95,9 +96,10 @@ function Overview({ token }: { token: string }) {
   function exportXlsx() { window.open(`/api/admin/export?periodId=${data.period.id}&t=${token}`, "_blank"); }
 
   if (!data) return <div>載入中…</div>;
-  const mMap = new Map<number, any>(); data.metrics.forEach((m: any)=>mMap.set(m.unit_id,m));
+  const gm: GroupMetricRow[] = data.groupMetrics ?? [];
+  const indicators: Indicator[] = data.indicators ?? [];
   const sMap = new Map<number, any>(); data.subs.forEach((s: any)=>sMap.set(s.unit_id,s));
-  const tot = data.units.reduce((a: any,u: any)=>{const m=mMap.get(u.id)??{};a.outbound_pax+=m.outbound_pax||0;a.conf_sessions+=m.conf_sessions||0;a.conf_pax+=m.conf_pax||0;return a;},{outbound_pax:0,conf_sessions:0,conf_pax:0});
+  const tot = indicators.map((ind)=>data.units.reduce((sum: number,u: any)=>sum+indicatorValue(gm,u.id,ind),0));
 
   return (
     <div>
@@ -114,9 +116,9 @@ function Overview({ token }: { token: string }) {
           <button onClick={exportXlsx} className="bg-green-700 text-white rounded px-4 py-2 text-sm">下載 Excel</button>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        {(["outbound_pax","conf_sessions","conf_pax"] as const).map((k)=>(
-          <div key={k} className="rounded-xl bg-white border p-4"><div className="text-xs text-gray-500">{METRIC_LABELS[k]}（全校）</div><div className="text-2xl font-bold text-navy">{tot[k]}</div></div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        {indicators.map((ind, i)=>(
+          <div key={ind.id} className="rounded-xl bg-white border p-4"><div className="text-xs text-gray-500">{ind.label}（全校）</div><div className="text-2xl font-bold text-navy">{tot[i]}</div></div>
         ))}
       </div>
       <h2 className="font-semibold mb-2">各系所填報狀態與成效</h2>
@@ -124,15 +126,15 @@ function Overview({ token }: { token: string }) {
         <table className="w-full text-sm bg-white border rounded-xl overflow-hidden">
           <thead className="bg-gray-50 text-gray-600"><tr>
             <th className="p-2">校區</th><th className="p-2 text-left">學院</th><th className="p-2 text-left">系所</th>
-            <th className="p-2">狀態</th><th className="p-2">人次</th><th className="p-2">場次</th><th className="p-2">人數</th><th className="p-2"></th>
+            <th className="p-2">狀態</th>{indicators.map((ind)=><th key={ind.id} className="p-2">{ind.label}</th>)}<th className="p-2"></th>
           </tr></thead>
           <tbody>
             {data.units.map((u: any)=>{
-              const m=mMap.get(u.id)??{}; const s=sMap.get(u.id);
+              const s=sMap.get(u.id);
               const status = s?.no_activity ? "申報無活動"
                 : s?.status==="submitted" ? "已送出"
                 : s?.status==="returned" ? "已退回"
-                : (m.act_count ?? 0) > 0 ? "填報中"
+                : unitActCount(gm,u.id) > 0 ? "填報中"
                 : "未填";
               const statusCls = status==="填報中" ? "text-amber-600 font-medium"
                 : status==="已送出" ? "text-green-700 font-medium"
@@ -140,7 +142,7 @@ function Overview({ token }: { token: string }) {
               return <tr key={u.id} className="border-t">
                 <td className="p-2 text-center">{u.campus}</td><td className="p-2">{u.college}</td><td className="p-2">{u.department}</td>
                 <td className={`p-2 text-center ${statusCls}`}>{status}</td>
-                <td className="p-2 text-center">{m.outbound_pax||0}</td><td className="p-2 text-center">{m.conf_sessions||0}</td><td className="p-2 text-center">{m.conf_pax||0}</td>
+                {indicators.map((ind)=><td key={ind.id} className="p-2 text-center">{indicatorValue(gm,u.id,ind)}</td>)}
                 <td className="p-2 text-center">{s?.status==="submitted" && <button onClick={()=>ret(u.id)} className="text-amber-600">退回</button>}</td>
               </tr>;
             })}
@@ -369,26 +371,39 @@ function Periods({ token }: { token: string }) {
   );
 }
 
-// ============ 選項管理（學制 / 活動大類 / 活動類型）============
-const GROUP_LABEL: Record<string, string> = { outbound: "出國交流（計入出國人次）", conference: "研討會類（計入場次/人數）" };
+// ============ 選項管理（指標歸組 / 學制 / 活動大類 / 活動類型）============
+function groupTally(g: any): string {
+  const parts: string[] = [];
+  if (g.count_sessions) parts.push("場次");
+  if (g.count_pax) parts.push("人次");
+  return parts.join("＋") || "—";
+}
 
 function Options({ token }: { token: string }) {
   const [opts, setOpts] = useState<any[]>([]);
+  const [groups, setGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true); const [msg, setMsg] = useState("");
   const [nd, setNd] = useState({ value: "", sort_order: "" });
-  const [nc, setNc] = useState({ value: "", label: "", metric_group: "conference", sort_order: "" });
+  const [nc, setNc] = useState({ value: "", label: "", metric_group: "", sort_order: "" });
   const [nt, setNt] = useState({ parent: "", value: "", sort_order: "" });
+  const [ng, setNg] = useState({ label: "", sort_order: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await fetch(`/api/admin/options`, { headers: { Authorization: `Bearer ${token}` } });
-    const j = await r.json(); setOpts(r.ok ? j.options : []); setLoading(false);
+    const [ro, rg] = await Promise.all([
+      fetch(`/api/admin/options`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`/api/admin/metric-groups`, { headers: { Authorization: `Bearer ${token}` } }),
+    ]);
+    const jo = await ro.json(); const jg = await rg.json();
+    setOpts(ro.ok ? jo.options : []); setGroups(rg.ok ? jg.groups : []); setLoading(false);
   }, [token]);
   useEffect(() => { load(); }, [load]);
 
   const degrees = opts.filter((o) => o.kind === "degree");
   const categories = opts.filter((o) => o.kind === "category");
   const types = opts.filter((o) => o.kind === "type");
+  const activeGroups = groups.filter((g) => g.active);
+  const groupLabel = (key: string) => { const g = groups.find((x) => x.key === key); return g ? `${g.label}（${groupTally(g)}）` : key; };
 
   async function add(kind: string, body: any) {
     setMsg("");
@@ -406,12 +421,51 @@ function Options({ token }: { token: string }) {
   }
   function edit(id: number, k: string, v: any) { setOpts((arr) => arr.map((x) => x.id === id ? { ...x, [k]: v } : x)); }
 
+  async function groupAdd(body: any) {
+    setMsg("");
+    const r = await fetch(`/api/admin/metric-groups`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) { setMsg(j.error || "新增失敗"); return false; }
+    load(); return true;
+  }
+  async function groupPatch(body: any) {
+    setMsg("");
+    const r = await fetch(`/api/admin/metric-groups`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) { setMsg(j.error || "更新失敗"); return; }
+    load();
+  }
+  function groupEdit(id: number, k: string, v: any) { setGroups((arr) => arr.map((x) => x.id === id ? { ...x, [k]: v } : x)); }
+
   if (loading) return <div>載入中…</div>;
 
   return (
     <div className="space-y-8">
       {msg && <p className="text-red-500 text-sm">{msg}</p>}
       <p className="text-xs text-gray-500">「停用」的項目不會再出現在填報下拉，但既有活動仍保留原值。項目名稱建立後不可修改（以維持歷史紀錄）。</p>
+
+      {/* 指標歸組 */}
+      <section>
+        <h2 className="font-semibold mb-2">指標歸組</h2>
+        <div className="flex flex-wrap gap-2 items-center mb-3">
+          <input className="border rounded p-2 text-sm" placeholder="歸組名稱（例：來臺交流）" value={ng.label} onChange={(e)=>setNg({...ng,label:e.target.value})} />
+          <input className="border rounded p-2 text-sm w-24" placeholder="排序" value={ng.sort_order} onChange={(e)=>setNg({...ng,sort_order:e.target.value})} />
+          <button onClick={async()=>{ if(await groupAdd(ng)) setNg({label:"",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增歸組</button>
+        </div>
+        <OptTable rows={groups} cols={["名稱","統計","排序","狀態",""]}>
+          {(g:any)=>(<>
+            <td className="p-2"><input className="border rounded p-1 w-full" value={g.label ?? ""} onChange={(e)=>groupEdit(g.id,"label",e.target.value)} /></td>
+            <td className="p-2 text-center text-gray-500">{groupTally(g)}</td>
+            <td className="p-2 text-center"><input className="border rounded p-1 w-16 text-center" value={g.sort_order} onChange={(e)=>groupEdit(g.id,"sort_order",e.target.value)} /></td>
+            <td className="p-2 text-center">{g.active ? <span className="text-green-700">啟用中</span> : <span className="text-gray-400">已停用</span>}</td>
+            <td className="p-2 text-center whitespace-nowrap">
+              <button onClick={()=>groupPatch({id:g.id,label:g.label,sort_order:Number(g.sort_order)})} className="text-navy mr-3">儲存</button>
+              <button onClick={()=>groupPatch({id:g.id,active:!g.active})} className={g.active?"text-red-600":"text-green-700"}>{g.active?"停用":"啟用"}</button>
+            </td>
+          </>)}
+        </OptTable>
+        <p className="text-xs text-gray-400 mt-2">指標歸組決定統計欄位：新增的歸組為「人次」統計（人數加總），會新增一欄「〔名稱〕人次」並顯示於填報、學院、後台與 Excel。內建「出國交流」「研討會類」維持原計算方式。停用會讓對應指標欄位隱藏，指向它的大類請改設其它歸組。</p>
+      </section>
 
       {/* 學制 */}
       <section>
@@ -441,20 +495,20 @@ function Options({ token }: { token: string }) {
           <input className="border rounded p-2 text-sm" placeholder="大類名稱（存入值）" value={nc.value} onChange={(e)=>setNc({...nc,value:e.target.value})} />
           <input className="border rounded p-2 text-sm" placeholder="顯示文字（選填）" value={nc.label} onChange={(e)=>setNc({...nc,label:e.target.value})} />
           <select className="border rounded p-2 text-sm" value={nc.metric_group} onChange={(e)=>setNc({...nc,metric_group:e.target.value})}>
-            <option value="outbound">{GROUP_LABEL.outbound}</option>
-            <option value="conference">{GROUP_LABEL.conference}</option>
+            <option value="">選擇指標歸組…</option>
+            {activeGroups.map((g)=><option key={g.key} value={g.key}>{g.label}（{groupTally(g)}）</option>)}
           </select>
           <input className="border rounded p-2 text-sm w-24" placeholder="排序" value={nc.sort_order} onChange={(e)=>setNc({...nc,sort_order:e.target.value})} />
-          <button onClick={async()=>{ if(await add("category", nc)) setNc({value:"",label:"",metric_group:"conference",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增大類</button>
+          <button onClick={async()=>{ if(await add("category", nc)) setNc({value:"",label:"",metric_group:"",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增大類</button>
         </div>
         <OptTable rows={categories} cols={["名稱","顯示文字","指標歸組","排序","狀態",""]}>
           {(o:any)=>(<>
             <td className="p-2">{o.value}</td>
             <td className="p-2"><input className="border rounded p-1 w-full" value={o.label ?? ""} onChange={(e)=>edit(o.id,"label",e.target.value)} /></td>
             <td className="p-2 text-center">
-              <select className="border rounded p-1" value={o.metric_group ?? "conference"} onChange={(e)=>edit(o.id,"metric_group",e.target.value)}>
-                <option value="outbound">{GROUP_LABEL.outbound}</option>
-                <option value="conference">{GROUP_LABEL.conference}</option>
+              <select className="border rounded p-1" value={o.metric_group ?? ""} onChange={(e)=>edit(o.id,"metric_group",e.target.value)}>
+                {!activeGroups.some((g)=>g.key===o.metric_group) && o.metric_group && <option value={o.metric_group}>{groupLabel(o.metric_group)}（已停用）</option>}
+                {activeGroups.map((g)=><option key={g.key} value={g.key}>{g.label}（{groupTally(g)}）</option>)}
               </select>
             </td>
             <td className="p-2 text-center"><input className="border rounded p-1 w-16 text-center" value={o.sort_order} onChange={(e)=>edit(o.id,"sort_order",e.target.value)} /></td>
@@ -465,7 +519,7 @@ function Options({ token }: { token: string }) {
             </td>
           </>)}
         </OptTable>
-        <p className="text-xs text-gray-400 mt-2">「指標歸組」決定該大類計入哪組統計：出國交流＝出國交流人次；研討會類＝場次與人數。</p>
+        <p className="text-xs text-gray-400 mt-2">「指標歸組」決定該大類計入哪組統計欄位；歸組可於上方「指標歸組」區管理。</p>
       </section>
 
       {/* 活動類型 */}

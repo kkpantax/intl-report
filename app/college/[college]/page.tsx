@@ -1,6 +1,8 @@
-// 學院頁：該院三指標彙整（唯讀）＋各系填報狀態。Server 載入初始資料後交給 client 定時更新。
+// 學院頁：該院各指標彙整（唯讀）＋各系填報狀態。Server 載入初始資料後交給 client 定時更新。
 import { supabaseAdmin, getOpenPeriod } from "@/lib/supabaseAdmin";
-import type { Unit, Submission, Metrics, Period } from "@/lib/types";
+import { getActiveMetricGroups } from "@/lib/options";
+import { deriveIndicators, type GroupMetricRow } from "@/lib/metrics";
+import type { Unit, Submission, Period } from "@/lib/types";
 import CollegeClient from "./CollegeClient";
 
 export const dynamic = "force-dynamic";
@@ -14,18 +16,21 @@ export default async function CollegePage({ params }: { params: { college: strin
   const units = (unitsRaw ?? []) as Unit[];
   const unitIds = units.map((u) => u.id);
 
-  const { data: metricsRaw } = await supabaseAdmin.from("v_activity_metrics").select("*")
+  const { data: gmRaw } = await supabaseAdmin.from("v_unit_group_metrics").select("*")
     .eq("period_id", period?.id ?? -1).in("unit_id", unitIds.length ? unitIds : [-1]);
   const { data: subsRaw } = await supabaseAdmin.from("submissions").select("*")
     .eq("period_id", period?.id ?? -1).in("unit_id", unitIds.length ? unitIds : [-1]);
+
+  const indicators = deriveIndicators(await getActiveMetricGroups());
 
   return (
     <CollegeClient
       college={college}
       period={period as Period | null}
       initialUnits={units}
-      initialMetrics={(metricsRaw ?? []) as (Metrics & { unit_id: number })[]}
+      initialGroupMetrics={(gmRaw ?? []) as GroupMetricRow[]}
       initialSubs={(subsRaw ?? []) as Submission[]}
+      indicators={indicators}
     />
   );
 }

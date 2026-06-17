@@ -1,7 +1,8 @@
 // 系填報頁（server 載入資料後交給 client 互動）
 import Link from "next/link";
 import { supabaseAdmin, getOpenPeriod } from "@/lib/supabaseAdmin";
-import { getActiveOptions } from "@/lib/options";
+import { getActiveOptions, getActiveMetricGroups } from "@/lib/options";
+import { deriveIndicators } from "@/lib/metrics";
 import type { Unit, Activity, Submission } from "@/lib/types";
 import DeptClient from "./DeptClient";
 
@@ -19,7 +20,8 @@ export default async function DeptPage({ params }: { params: { unitId: string } 
   const { data: sub } = await supabaseAdmin.from("submissions").select("*")
     .eq("unit_id", unitId).eq("period_id", period?.id ?? -1).maybeSingle();
 
-  const options = await getActiveOptions();
+  const [options, groups] = await Promise.all([getActiveOptions(), getActiveMetricGroups()]);
+  const indicators = deriveIndicators(groups);
 
   return (
     <DeptClient
@@ -28,6 +30,7 @@ export default async function DeptPage({ params }: { params: { unitId: string } 
       initialActivities={(acts ?? []) as Activity[]}
       initialSubmission={(sub ?? null) as Submission | null}
       options={options}
+      indicators={indicators}
     />
   );
 }
