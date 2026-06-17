@@ -14,6 +14,9 @@ export async function GET(req: NextRequest) {
   const { data: metrics } = await supabaseAdmin.from("v_activity_metrics").select("*").eq("period_id", period.id);
   const mMap = new Map<number, any>(); (metrics ?? []).forEach((m: any) => mMap.set(m.unit_id, m));
   const uMap = new Map<number, any>(); (units ?? []).forEach((u: any) => uMap.set(u.id, u));
+  // 大類顯示文字（後台可自訂；找不到則用原值）
+  const { data: cats } = await supabaseAdmin.from("options").select("value,label").eq("kind", "category");
+  const catLabel = new Map<string, string>(); (cats ?? []).forEach((c: any) => catLabel.set(c.value, c.label || c.value));
 
   const wb = new ExcelJS.Workbook();
   const NAVY = "FF1F3864";
@@ -42,7 +45,7 @@ export async function GET(req: NextRequest) {
   d.getRow(1).eachCell((c) => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } }; });
   (acts ?? []).forEach((a: any) => {
     const u = uMap.get(a.unit_id) ?? {};
-    const cat = a.category === "出國交流" ? "出國交流" : "研討會/工作營/工作坊";
+    const cat = catLabel.get(a.category) ?? a.category;
     d.addRow([u.campus, u.college, u.department, a.degree, cat, a.activity_type, a.title, a.start_date, a.end_date, a.country, a.headcount, a.note, a.reporter]);
   });
   d.columns.forEach((c, i) => (c.width = [7, 14, 22, 12, 16, 14, 40, 13, 13, 12, 9, 24, 12][i]));

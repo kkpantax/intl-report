@@ -4,13 +4,14 @@ import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 import { METRIC_LABELS, CAMPUSES } from "@/lib/constants";
 
-type Tab = "overview" | "accounts" | "units" | "periods";
+type Tab = "overview" | "accounts" | "units" | "periods" | "options";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "總覽" },
   { key: "accounts", label: "帳號管理" },
   { key: "units", label: "填報系所管理" },
   { key: "periods", label: "期數管理" },
+  { key: "options", label: "選項管理" },
 ];
 
 export default function AdminPage() {
@@ -66,6 +67,7 @@ export default function AdminPage() {
       {tab==="accounts" && <Accounts token={token} />}
       {tab==="units" && <Units token={token} />}
       {tab==="periods" && <Periods token={token} />}
+      {tab==="options" && <Options token={token} />}
     </div>
   );
 }
@@ -74,12 +76,16 @@ export default function AdminPage() {
 function Overview({ token }: { token: string }) {
   const [data, setData] = useState<any>(null);
   const [pid, setPid] = useState<number | undefined>();
+  const [updatedAt, setUpdatedAt] = useState<string>("");
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/admin/summary${pid ? `?periodId=${pid}` : ""}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (r.ok) { const j = await r.json(); setData(j); setPid(j.period?.id); }
+    if (r.ok) { const j = await r.json(); setData(j); setPid(j.period?.id); setUpdatedAt(new Date().toLocaleTimeString("zh-TW")); }
   }, [token, pid]);
   useEffect(() => { load(); }, [load]);
+
+  // 每 30 秒自動更新，不必等各系送出即可看到目前進度。
+  useEffect(() => { const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
 
   async function ret(unitId: number) {
     if (!confirm("退回此系所，使其可再編輯？")) return;
@@ -95,9 +101,13 @@ function Overview({ token }: { token: string }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-sm text-gray-600">期別：<span className="font-semibold">{data.period?.name}</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <div className="text-sm text-gray-600">
+          期別：<span className="font-semibold">{data.period?.name}</span>
+          {updatedAt && <span className="ml-3 text-xs text-gray-400">最後更新 {updatedAt} ・ 每 30 秒自動更新</span>}
+        </div>
         <div className="flex gap-2">
+          <button onClick={load} className="border rounded px-3 py-2 text-sm hover:bg-gray-50">立即更新</button>
           <select className="border rounded p-2 text-sm" value={pid} onChange={(e)=>setPid(Number(e.target.value))}>
             {data.periods.map((p: any)=><option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -119,10 +129,17 @@ function Overview({ token }: { token: string }) {
           <tbody>
             {data.units.map((u: any)=>{
               const m=mMap.get(u.id)??{}; const s=sMap.get(u.id);
-              const status = s?.no_activity ? "申報無活動" : (s ? {draft:"草稿",submitted:"已送出",returned:"已退回"}[s.status as string] : "未填");
+              const status = s?.no_activity ? "申報無活動"
+                : s?.status==="submitted" ? "已送出"
+                : s?.status==="returned" ? "已退回"
+                : (m.act_count ?? 0) > 0 ? "填報中"
+                : "未填";
+              const statusCls = status==="填報中" ? "text-amber-600 font-medium"
+                : status==="已送出" ? "text-green-700 font-medium"
+                : status==="已退回" ? "text-red-600" : "text-gray-500";
               return <tr key={u.id} className="border-t">
                 <td className="p-2 text-center">{u.campus}</td><td className="p-2">{u.college}</td><td className="p-2">{u.department}</td>
-                <td className="p-2 text-center">{status}</td>
+                <td className={`p-2 text-center ${statusCls}`}>{status}</td>
                 <td className="p-2 text-center">{m.outbound_pax||0}</td><td className="p-2 text-center">{m.conf_sessions||0}</td><td className="p-2 text-center">{m.conf_pax||0}</td>
                 <td className="p-2 text-center">{s?.status==="submitted" && <button onClick={()=>ret(u.id)} className="text-amber-600">退回</button>}</td>
               </tr>;
@@ -348,6 +365,148 @@ function Periods({ token }: { token: string }) {
         </div>
       )}
       <p className="text-xs text-gray-400 mt-3">建議同時只開放一期；將某期設為開放時，系統會自動關閉其它期。</p>
+    </div>
+  );
+}
+
+// ============ 選項管理（學制 / 活動大類 / 活動類型）============
+const GROUP_LABEL: Record<string, string> = { outbound: "出國交流（計入出國人次）", conference: "研討會類（計入場次/人數）" };
+
+function Options({ token }: { token: string }) {
+  const [opts, setOpts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true); const [msg, setMsg] = useState("");
+  const [nd, setNd] = useState({ value: "", sort_order: "" });
+  const [nc, setNc] = useState({ value: "", label: "", metric_group: "conference", sort_order: "" });
+  const [nt, setNt] = useState({ parent: "", value: "", sort_order: "" });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await fetch(`/api/admin/options`, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await r.json(); setOpts(r.ok ? j.options : []); setLoading(false);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  const degrees = opts.filter((o) => o.kind === "degree");
+  const categories = opts.filter((o) => o.kind === "category");
+  const types = opts.filter((o) => o.kind === "type");
+
+  async function add(kind: string, body: any) {
+    setMsg("");
+    const r = await fetch(`/api/admin/options`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ kind, ...body }) });
+    const j = await r.json();
+    if (!r.ok) { setMsg(j.error || "新增失敗"); return false; }
+    load(); return true;
+  }
+  async function patch(body: any) {
+    setMsg("");
+    const r = await fetch(`/api/admin/options`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) { setMsg(j.error || "更新失敗"); return; }
+    load();
+  }
+  function edit(id: number, k: string, v: any) { setOpts((arr) => arr.map((x) => x.id === id ? { ...x, [k]: v } : x)); }
+
+  if (loading) return <div>載入中…</div>;
+
+  return (
+    <div className="space-y-8">
+      {msg && <p className="text-red-500 text-sm">{msg}</p>}
+      <p className="text-xs text-gray-500">「停用」的項目不會再出現在填報下拉，但既有活動仍保留原值。項目名稱建立後不可修改（以維持歷史紀錄）。</p>
+
+      {/* 學制 */}
+      <section>
+        <h2 className="font-semibold mb-2">學制</h2>
+        <div className="flex flex-wrap gap-2 items-center mb-3">
+          <input className="border rounded p-2 text-sm" placeholder="新學制名稱" value={nd.value} onChange={(e)=>setNd({...nd,value:e.target.value})} />
+          <input className="border rounded p-2 text-sm w-24" placeholder="排序" value={nd.sort_order} onChange={(e)=>setNd({...nd,sort_order:e.target.value})} />
+          <button onClick={async()=>{ if(await add("degree", nd)) setNd({value:"",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增學制</button>
+        </div>
+        <OptTable rows={degrees} cols={["名稱","排序","狀態",""]}>
+          {(o:any)=>(<>
+            <td className="p-2">{o.value}</td>
+            <td className="p-2 text-center"><input className="border rounded p-1 w-16 text-center" value={o.sort_order} onChange={(e)=>edit(o.id,"sort_order",e.target.value)} /></td>
+            <td className="p-2 text-center">{o.active ? <span className="text-green-700">啟用中</span> : <span className="text-gray-400">已停用</span>}</td>
+            <td className="p-2 text-center whitespace-nowrap">
+              <button onClick={()=>patch({id:o.id,sort_order:Number(o.sort_order)})} className="text-navy mr-3">儲存</button>
+              <button onClick={()=>patch({id:o.id,active:!o.active})} className={o.active?"text-red-600":"text-green-700"}>{o.active?"停用":"啟用"}</button>
+            </td>
+          </>)}
+        </OptTable>
+      </section>
+
+      {/* 活動大類 */}
+      <section>
+        <h2 className="font-semibold mb-2">活動大類</h2>
+        <div className="flex flex-wrap gap-2 items-center mb-3">
+          <input className="border rounded p-2 text-sm" placeholder="大類名稱（存入值）" value={nc.value} onChange={(e)=>setNc({...nc,value:e.target.value})} />
+          <input className="border rounded p-2 text-sm" placeholder="顯示文字（選填）" value={nc.label} onChange={(e)=>setNc({...nc,label:e.target.value})} />
+          <select className="border rounded p-2 text-sm" value={nc.metric_group} onChange={(e)=>setNc({...nc,metric_group:e.target.value})}>
+            <option value="outbound">{GROUP_LABEL.outbound}</option>
+            <option value="conference">{GROUP_LABEL.conference}</option>
+          </select>
+          <input className="border rounded p-2 text-sm w-24" placeholder="排序" value={nc.sort_order} onChange={(e)=>setNc({...nc,sort_order:e.target.value})} />
+          <button onClick={async()=>{ if(await add("category", nc)) setNc({value:"",label:"",metric_group:"conference",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增大類</button>
+        </div>
+        <OptTable rows={categories} cols={["名稱","顯示文字","指標歸組","排序","狀態",""]}>
+          {(o:any)=>(<>
+            <td className="p-2">{o.value}</td>
+            <td className="p-2"><input className="border rounded p-1 w-full" value={o.label ?? ""} onChange={(e)=>edit(o.id,"label",e.target.value)} /></td>
+            <td className="p-2 text-center">
+              <select className="border rounded p-1" value={o.metric_group ?? "conference"} onChange={(e)=>edit(o.id,"metric_group",e.target.value)}>
+                <option value="outbound">{GROUP_LABEL.outbound}</option>
+                <option value="conference">{GROUP_LABEL.conference}</option>
+              </select>
+            </td>
+            <td className="p-2 text-center"><input className="border rounded p-1 w-16 text-center" value={o.sort_order} onChange={(e)=>edit(o.id,"sort_order",e.target.value)} /></td>
+            <td className="p-2 text-center">{o.active ? <span className="text-green-700">啟用中</span> : <span className="text-gray-400">已停用</span>}</td>
+            <td className="p-2 text-center whitespace-nowrap">
+              <button onClick={()=>patch({id:o.id,label:o.label,metric_group:o.metric_group,sort_order:Number(o.sort_order)})} className="text-navy mr-3">儲存</button>
+              <button onClick={()=>patch({id:o.id,active:!o.active})} className={o.active?"text-red-600":"text-green-700"}>{o.active?"停用":"啟用"}</button>
+            </td>
+          </>)}
+        </OptTable>
+        <p className="text-xs text-gray-400 mt-2">「指標歸組」決定該大類計入哪組統計：出國交流＝出國交流人次；研討會類＝場次與人數。</p>
+      </section>
+
+      {/* 活動類型 */}
+      <section>
+        <h2 className="font-semibold mb-2">活動類型</h2>
+        <div className="flex flex-wrap gap-2 items-center mb-3">
+          <select className="border rounded p-2 text-sm" value={nt.parent} onChange={(e)=>setNt({...nt,parent:e.target.value})}>
+            <option value="">選擇所屬大類…</option>
+            {categories.map((c)=><option key={c.id} value={c.value}>{c.label ?? c.value}</option>)}
+          </select>
+          <input className="border rounded p-2 text-sm" placeholder="類型名稱" value={nt.value} onChange={(e)=>setNt({...nt,value:e.target.value})} />
+          <input className="border rounded p-2 text-sm w-24" placeholder="排序" value={nt.sort_order} onChange={(e)=>setNt({...nt,sort_order:e.target.value})} />
+          <button onClick={async()=>{ if(await add("type", nt)) setNt({parent:"",value:"",sort_order:""}); }} className="bg-navy text-white rounded px-4 py-2 text-sm">新增類型</button>
+        </div>
+        <OptTable rows={types} cols={["類型","所屬大類","排序","狀態",""]}>
+          {(o:any)=>(<>
+            <td className="p-2">{o.value}</td>
+            <td className="p-2 text-center text-gray-500">{o.parent}</td>
+            <td className="p-2 text-center"><input className="border rounded p-1 w-16 text-center" value={o.sort_order} onChange={(e)=>edit(o.id,"sort_order",e.target.value)} /></td>
+            <td className="p-2 text-center">{o.active ? <span className="text-green-700">啟用中</span> : <span className="text-gray-400">已停用</span>}</td>
+            <td className="p-2 text-center whitespace-nowrap">
+              <button onClick={()=>patch({id:o.id,sort_order:Number(o.sort_order)})} className="text-navy mr-3">儲存</button>
+              <button onClick={()=>patch({id:o.id,active:!o.active})} className={o.active?"text-red-600":"text-green-700"}>{o.active?"停用":"啟用"}</button>
+            </td>
+          </>)}
+        </OptTable>
+      </section>
+    </div>
+  );
+}
+
+function OptTable({ rows, cols, children }: { rows: any[]; cols: string[]; children: (o: any) => React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm bg-white border rounded-xl overflow-hidden">
+        <thead className="bg-gray-50 text-gray-600"><tr>{cols.map((c,i)=><th key={i} className="p-2 text-left">{c}</th>)}</tr></thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan={cols.length} className="p-4 text-center text-gray-400">尚無項目</td></tr>}
+          {rows.map((o)=>(<tr key={o.id} className={`border-t ${o.active ? "" : "opacity-50"}`}>{children(o)}</tr>))}
+        </tbody>
+      </table>
     </div>
   );
 }

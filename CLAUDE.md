@@ -12,11 +12,17 @@
   - **帳號管理**：列出/新增/刪除後台帳號（Supabase Auth）。
   - **填報系所管理**：列出/新增/編輯/刪除系所（units）。
   - **期數管理**：列出/新增/編輯期別、設為開放（自動關閉其它期）。
-- 後台 API（需 admin token）：`/api/admin/summary`、`/api/admin/return`、`/api/admin/export`、`/api/admin/accounts`、`/api/admin/units`、`/api/admin/periods`。
+  - **選項管理**：增刪/停用 學制、活動大類（含 metric_group 指標歸組）、活動類型（連動所屬大類）。
+- 後台 API（需 admin token）：`/api/admin/summary`、`/api/admin/return`、`/api/admin/export`、`/api/admin/accounts`、`/api/admin/units`、`/api/admin/periods`、`/api/admin/options`。
+- 公開讀取 API：`/api/options`（填報下拉）、`/api/college`（學院頁定時更新）。
+- 學院頁與後台總覽顯示「填報中」並每 30 秒自動更新；填報頁亦定時同步全系清單。
 
 ## 慣例
-- 大類 DB 值：`出國交流`、`研討會工作營工作坊`（標籤見 `lib/constants.ts`）。
+- 學制／活動大類／活動類型由 DB `options` 表維護（後台「選項管理」可增刪停用）；server 端讀取與驗證走 `lib/options.ts`（表不存在或為空時退回 `lib/constants.ts` 預設值）。大類預設 DB 值：`出國交流`、`研討會工作營工作坊`。
+- 大類以 `metric_group`（`outbound` / `conference`）決定計入哪組指標；視圖 `v_activity_metrics` 依此分組，並含 `act_count`（判斷「填報中」）。
+- 國家/地區為靜態檔 `lib/countries.ts`（教育部國別代碼，由 `scripts/gen_countries.py` 從 docx 產生），填報用 `components/CountryCombobox.tsx`。
 - 填報端絕不直接存取資料表；一律走 `/api/*`。`lib/supabaseAdmin.ts` 只能在 server 使用。
+- DB 變更請寫成 `db/migrations/*.sql`（可重複執行）並同步更新 `db/schema.sql`（供全新安裝）。
 
 ## 建議 TODO（依優先序）
 1. ~~**期別管理 UI**~~：已完成（後台「期數管理」分頁）。

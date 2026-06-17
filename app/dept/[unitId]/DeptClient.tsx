@@ -1,17 +1,41 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CATEGORIES, TYPES_BY_CATEGORY, DEGREES, METRIC_LABELS } from "@/lib/constants";
+import { METRIC_LABELS } from "@/lib/constants";
+import type { OptionSet } from "@/lib/options";
 import type { Unit, Activity, Submission, Period } from "@/lib/types";
+import CountryCombobox from "@/components/CountryCombobox";
 
-const empty = {
-  degree: "學士", category: "出國交流", activity_type: "移地教學",
-  title: "", start_date: "", end_date: "", country: "", headcount: "", note: "",
-};
-
-export default function DeptClient({ unit, period, initialActivities, initialSubmission }:{
+export default function DeptClient({ unit, period, initialActivities, initialSubmission, options }:{
   unit: Unit; period: Period | null; initialActivities: Activity[]; initialSubmission: Submission | null;
+  options: OptionSet;
 }) {
+  // 由後台選項建立預設值與對應表
+  const degrees = options.degrees;
+  const categories = options.categories;
+  const typesByCategory = options.typesByCategory;
+  const catGroup = useMemo(() => {
+    const m: Record<string, "outbound" | "conference"> = {};
+    categories.forEach((c) => (m[c.value] = c.metric_group));
+    return m;
+  }, [categories]);
+  const catLabel = useMemo(() => {
+    const m: Record<string, string> = {};
+    categories.forEach((c) => (m[c.value] = c.label));
+    return m;
+  }, [categories]);
+
+  const empty = useMemo(() => {
+    const cat = categories[0]?.value ?? "";
+    return {
+      degree: degrees[0]?.value ?? "",
+      category: cat,
+      activity_type: (typesByCategory[cat] ?? [])[0] ?? "",
+      title: "", start_date: "", end_date: "", country: "", headcount: "", note: "",
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [reporter, setReporter] = useState("");
   const [entered, setEntered] = useState(false);
   const [ext, setExt] = useState("");
@@ -21,19 +45,24 @@ export default function DeptClient({ unit, period, initialActivities, initialSub
   const [editId, setEditId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-useEffect(() => {
-    (async () => {
+  // 載入即抓一次，之後每 30 秒同步一次（全系共用清單，反映他人即時編輯/送出）。
+  useEffect(() => {
+    let alive = true;
+    async function pull() {
       const r = await fetch(`/api/activities?unitId=${unit.id}`, { cache: "no-store" });
-      if (r.ok) { const j = await r.json(); setActs(j.activities ?? []); setSub(j.submission ?? null); }
-    })();
+      if (alive && r.ok) { const j = await r.json(); setActs(j.activities ?? []); setSub(j.submission ?? null); }
+    }
+    pull();
+    const t = setInterval(pull, 30000);
+    return () => { alive = false; clearInterval(t); };
   }, [unit.id]);
 
   const locked = sub?.status === "submitted";
   const metrics = useMemo(() => acts.reduce((a, x) => {
-    if (x.category === "出國交流") a.outbound_pax += x.headcount;
+    if ((catGroup[x.category] ?? "conference") === "outbound") a.outbound_pax += x.headcount;
     else { a.conf_sessions += 1; a.conf_pax += x.headcount; }
     return a;
-  }, { outbound_pax: 0, conf_sessions: 0, conf_pax: 0 }), [acts]);
+  }, { outbound_pax: 0, conf_sessions: 0, conf_pax: 0 }), [acts, catGroup]);
 
   if (!period) return <div>目前未開放填報。</div>;
 
@@ -59,7 +88,7 @@ useEffect(() => {
     );
   }
 
-  const types = TYPES_BY_CATEGORY[form.category] ?? [];
+  const types = typesByCategory[form.category] ?? [];
 
   async function refresh() {
     const r = await fetch(`/api/activities?unitId=${unit.id}`);
@@ -128,14 +157,14 @@ useEffect(() => {
         <div className="rounded-xl bg-white border p-5 mb-6">
           <h2 className="font-semibold mb-3">{editId ? "編輯活動" : "新增活動"}</h2>
           <div className="grid md:grid-cols-2 gap-3">
-            <Field label="學制"><select className="inp" value={form.degree} onChange={(e)=>setForm({...form,degree:e.target.value})}>{DEGREES.map(d=><option key={d}>{d}</option>)}</select></Field>
-            <Field label="活動大類"><select className="inp" value={form.category} onChange={(e)=>{const c=e.target.value;setForm({...form,category:c,activity_type:TYPES_BY_CATEGORY[c][0]})}}>{CATEGORIES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}</select></Field>
+            <Field label="學制"><select className="inp" value={form.degree} onChange={(e)=>setForm({...form,degree:e.target.value})}>{degrees.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}</select></Field>
+            <Field label="活動大類"><select className="inp" value={form.category} onChange={(e)=>{const c=e.target.value;setForm({...form,category:c,activity_type:(typesByCategory[c]??[])[0]??""})}}>{categories.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}</select></Field>
             <Field label="活動類型"><select className="inp" value={form.activity_type} onChange={(e)=>setForm({...form,activity_type:e.target.value})}>{types.map(t=><option key={t}>{t}</option>)}</select></Field>
             <Field label="參與人數"><input type="number" min={0} className="inp" value={form.headcount} onChange={(e)=>setForm({...form,headcount:e.target.value})}/></Field>
             <Field label="活動名稱" full><input className="inp" value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></Field>
             <Field label="開始日期"><input type="date" className="inp" value={form.start_date} onChange={(e)=>setForm({...form,start_date:e.target.value})}/></Field>
             <Field label="結束日期"><input type="date" className="inp" value={form.end_date} onChange={(e)=>setForm({...form,end_date:e.target.value})}/></Field>
-            <Field label="國家/地區"><input className="inp" value={form.country} onChange={(e)=>setForm({...form,country:e.target.value})}/></Field>
+            <Field label="國家/地區"><CountryCombobox value={form.country} onChange={(v)=>setForm({...form,country:v})}/></Field>
             <Field label="備註" full><input className="inp" value={form.note} onChange={(e)=>setForm({...form,note:e.target.value})}/></Field>
           </div>
           <div className="mt-4 flex gap-2 items-center">
@@ -159,7 +188,7 @@ useEffect(() => {
             {acts.map((a)=>(
               <tr key={a.id} className="border-t">
                 <td className="p-2">{a.title}</td>
-                <td className="p-2 text-center">{a.category === "出國交流" ? "出國交流" : "研討會類"}</td>
+                <td className="p-2 text-center">{catLabel[a.category] ?? a.category}</td>
                 <td className="p-2 text-center">{a.activity_type}</td>
                 <td className="p-2 text-center">{a.degree}</td>
                 <td className="p-2 text-center">{a.headcount}</td>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, getOpenPeriod } from "@/lib/supabaseAdmin";
-import { TYPES_BY_CATEGORY } from "@/lib/constants";
+import { validateActivityOptions } from "@/lib/options";
 
 async function assertUnlocked(unitId: number) {
   const period = await getOpenPeriod();
@@ -15,8 +15,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const b = await req.json();
   const chk = await assertUnlocked(b.unitId);
   if ("error" in chk) return NextResponse.json({ error: chk.error }, { status: 409 });
-  if (!(TYPES_BY_CATEGORY[b.category] ?? []).includes(b.activity_type))
-    return NextResponse.json({ error: "活動類型與大類不符" }, { status: 400 });
+  const invalid = await validateActivityOptions(b);
+  if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
   const { error } = await supabaseAdmin.from("activities").update({
     degree: b.degree, category: b.category, activity_type: b.activity_type, title: b.title,
     start_date: b.start_date || null, end_date: b.end_date || null, country: b.country || null,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, getOpenPeriod } from "@/lib/supabaseAdmin";
-import { TYPES_BY_CATEGORY } from "@/lib/constants";
+import { validateActivityOptions } from "@/lib/options";
 
 // 取得某系所本期清單 + 送出狀態
 export async function GET(req: NextRequest) {
@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
   const { data: sub } = await supabaseAdmin.from("submissions").select("status")
     .eq("unit_id", b.unitId).eq("period_id", period.id).maybeSingle();
   if (sub?.status === "submitted") return NextResponse.json({ error: "已送出鎖定，無法新增" }, { status: 409 });
-  if (!(TYPES_BY_CATEGORY[b.category] ?? []).includes(b.activity_type))
-    return NextResponse.json({ error: "活動類型與大類不符" }, { status: 400 });
+  const invalid = await validateActivityOptions(b);
+  if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
   if (!b.reporter?.trim()) return NextResponse.json({ error: "缺填報人" }, { status: 400 });
 
   const { error } = await supabaseAdmin.from("activities").insert({

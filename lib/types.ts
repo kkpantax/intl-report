@@ -12,4 +12,4 @@ export type Submission = {
   status: 'draft' | 'submitted' | 'returned';
   no_activity: boolean; submitted_by: string | null; submitted_at: string | null;
 };
-export type Metrics = { outbound_pax: number; conf_sessions: number; conf_pax: number; };
+export type Metrics = { outbound_pax: number; conf_sessions: number; conf_pax: number; act_count?: number; };

@@ -30,9 +30,9 @@ create table if not exists activities (
   id          uuid primary key default gen_random_uuid(),
   period_id   bigint not null references periods(id) on delete cascade,
   unit_id     bigint not null references units(id)   on delete cascade,
-  degree      text   not null check (degree in ('學士','碩士','博士','碩士在職專班')),
-  category    text   not null check (category in ('出國交流','研討會工作營工作坊')),
-  activity_type text not null,                        -- 9 種類型之一（見 lib/constants.ts）
+  degree      text   not null,                         -- 由 options 表（kind='degree'）維護，後台可增刪
+  category    text   not null,                         -- 由 options 表（kind='category'）維護，後台可增刪
+  activity_type text not null,                          -- 由 options 表（kind='type'）維護，連動所屬大類
   title       text   not null,                        -- 活動名稱
   start_date  date,
   end_date    date,
@@ -59,6 +59,21 @@ create table if not exists submissions (
   unique (period_id, unit_id)
 );
 
+-- ---------- 選項：學制 / 活動大類 / 活動類型（後台可增刪、停用）----------
+create table if not exists options (
+  id           bigint generated always as identity primary key,
+  kind         text not null check (kind in ('degree','category','type')),
+  value        text not null,                  -- 實際存入 activities 的字串（建立後不可改）
+  label        text,                           -- 顯示文字（留空＝同 value）
+  parent       text,                           -- 僅「活動類型」使用：所屬大類的 value
+  metric_group text check (metric_group in ('outbound','conference')), -- 僅「活動大類」使用：歸入哪組指標
+  sort_order   int  not null default 0,
+  active       boolean not null default true,  -- 停用＝不再出現在填報下拉（保留以維持歷史對應）
+  created_at   timestamptz not null default now()
+);
+create unique index if not exists uq_options_kind_value_parent
+  on options(kind, value, coalesce(parent, ''));
+
 -- ---------- 自動更新 updated_at ----------
 create or replace function touch_updated_at() returns trigger as $$
 begin new.updated_at = now(); return new; end; $$ language plpgsql;
@@ -71,14 +86,17 @@ create trigger trg_submissions_touch before update on submissions
 
 -- ---------- 三指標彙總視圖（依 期別 × 系所）----------
 -- 只彙總「有活動」的列；前端/後端再左接 units 清單以顯示 0。
+-- 依大類的 metric_group 分組（支援自訂大類）；找不到對應大類時預設歸 conference。
 create or replace view v_activity_metrics as
 select
   a.period_id,
   a.unit_id,
-  coalesce(sum(a.headcount) filter (where a.category = '出國交流'), 0)             as outbound_pax,    -- 出國交流人次
-  count(*)               filter (where a.category = '研討會工作營工作坊')           as conf_sessions,   -- 研討會/工作營/工作坊 場次
-  coalesce(sum(a.headcount) filter (where a.category = '研討會工作營工作坊'), 0)   as conf_pax         -- 研討會/工作營/工作坊 人數
+  coalesce(sum(a.headcount) filter (where coalesce(c.metric_group,'conference') = 'outbound'), 0)    as outbound_pax, -- 出國交流人次
+  count(*)                  filter (where coalesce(c.metric_group,'conference') = 'conference')      as conf_sessions,-- 研討會/工作營/工作坊 場次
+  coalesce(sum(a.headcount) filter (where coalesce(c.metric_group,'conference') = 'conference'), 0)  as conf_pax,     -- 研討會/工作營/工作坊 人數
+  count(*)                                                                                           as act_count     -- 本期該系活動筆數（用於判斷「填報中」）
 from activities a
+left join options c on c.kind = 'category' and c.value = a.category
 group by a.period_id, a.unit_id;
 
 -- =====================================================================
@@ -91,12 +109,34 @@ alter table periods     enable row level security;
 alter table units       enable row level security;
 alter table activities  enable row level security;
 alter table submissions enable row level security;
+alter table options     enable row level security;
 
 -- =====================================================================
 -- 預設期別
 -- =====================================================================
 insert into periods (name, start_date, end_date, is_open)
 values ('115年1-6月', '2026-01-01', '2026-06-30', true);
+
+-- =====================================================================
+-- 選項種子（學制 / 活動大類 / 活動類型）
+-- =====================================================================
+insert into options (kind, value, label, parent, metric_group, sort_order) values
+ ('degree','學士',         null, null, null, 1),
+ ('degree','碩士',         null, null, null, 2),
+ ('degree','博士',         null, null, null, 3),
+ ('degree','碩士在職專班', null, null, null, 4),
+ ('category','出國交流',           '出國交流',               null, 'outbound',   1),
+ ('category','研討會工作營工作坊', '研討會 / 工作營 / 工作坊', null, 'conference', 2),
+ ('type','移地教學',       null, '出國交流', null, 1),
+ ('type','文化交流團',     null, '出國交流', null, 2),
+ ('type','國際參訪',       null, '出國交流', null, 3),
+ ('type','境外實習',       null, '出國交流', null, 4),
+ ('type','境外工作營',     null, '出國交流', null, 5),
+ ('type','國際競賽及展演', null, '出國交流', null, 6),
+ ('type','國際研討會',     null, '研討會工作營工作坊', null, 1),
+ ('type','工作營',         null, '研討會工作營工作坊', null, 2),
+ ('type','工作坊',         null, '研討會工作營工作坊', null, 3)
+on conflict do nothing;
 
 -- =====================================================================
 -- 單位種子資料（沿用去年清單，含台北＋高雄，國際事務處為行政單位）
