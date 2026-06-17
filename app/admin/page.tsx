@@ -222,7 +222,7 @@ function Units({ token }: { token: string }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await fetch(`/api/admin/units`, { headers: { Authorization: `Bearer ${token}` } });
+    const r = await fetch(`/api/admin/units`, { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
     const j = await r.json(); setUnits(r.ok ? j.units : []); setLoading(false);
   }, [token]);
   useEffect(() => { load(); }, [load]);
