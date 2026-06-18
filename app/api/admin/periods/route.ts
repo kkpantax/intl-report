@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 
 // 期數管理：列出 / 新增 / 編輯（含開關 is_open）
+
+// 期別異動（尤其切換開放期）後，讓所有讀「目前開放期別」的前台頁面下次造訪重抓 DB。
+// 這些頁面已是 force-dynamic；此處為 belt-and-suspenders，並讓 client Router Cache 立即失效。
+function revalidateFront() {
+  revalidatePath("/report");
+  revalidatePath("/college/[college]", "page");
+  revalidatePath("/dept/[unitId]", "page");
+}
 
 export async function GET(req: NextRequest) {
   if (!(await requireAdmin(req))) return NextResponse.json({ error: "未授權" }, { status: 401 });
@@ -25,6 +34,7 @@ export async function POST(req: NextRequest) {
     name: b.name.trim(), start_date: b.start_date, end_date: b.end_date, is_open: !!b.is_open,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  revalidateFront();
   return NextResponse.json({ ok: true });
 }
 
@@ -41,5 +51,6 @@ export async function PATCH(req: NextRequest) {
   for (const k of ["name", "start_date", "end_date", "is_open"]) if (k in b) patch[k] = b[k];
   const { error } = await supabaseAdmin.from("periods").update(patch).eq("id", b.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  revalidateFront();
   return NextResponse.json({ ok: true });
 }

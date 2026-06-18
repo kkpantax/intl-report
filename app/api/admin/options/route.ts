@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";
 
@@ -7,6 +8,12 @@ import { requireAdmin } from "@/lib/requireAdmin";
 // 「刪除」一律以停用（active=false）處理，避免破壞既有活動與大類的指標歸組。
 
 const KINDS = ["degree", "category", "type"] as const;
+
+// 選項異動後，讓填報頁（消費學制/大類/類型下拉的唯一頁面）下次造訪重抓 DB，不吃 client Router Cache。
+// dept 頁本身已是 force-dynamic；此處為 belt-and-suspenders，確保新增/停用即時反映。
+function revalidateFront() {
+  revalidatePath("/dept/[unitId]", "page");
+}
 
 async function isValidGroup(key: string | null | undefined): Promise<boolean> {
   if (!key) return false;
@@ -57,6 +64,7 @@ export async function POST(req: NextRequest) {
     const msg = /duplicate|unique/i.test(error.message) ? "此項目已存在" : error.message;
     return NextResponse.json({ error: msg }, { status: 400 });
   }
+  revalidateFront();
   return NextResponse.json({ ok: true });
 }
 
@@ -78,5 +86,6 @@ export async function PATCH(req: NextRequest) {
 
   const { error } = await supabaseAdmin.from("options").update(patch).eq("id", b.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  revalidateFront();
   return NextResponse.json({ ok: true });
 }

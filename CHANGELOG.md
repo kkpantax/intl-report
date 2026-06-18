@@ -12,6 +12,11 @@
 ## [Unreleased]
 （尚未發布、開發中的變更先記在這裡）
 
+## [1.3.2] - 2026-06-18
+### 修正 Fixed
+- 後台新增／停用「選項（學制／大類／類型）、期別、指標歸組」後，前台（填報頁、學院頁）需重新部署才看到變更的殘留問題：在 `/api/admin/options`、`/api/admin/periods`、`/api/admin/metric-groups` 三個寫入路由補上 `revalidatePath`，比照既有 `/api/admin/units` 的作法，讓對應前台頁面（`/dept/[unitId]`、`/college/[college]`、`/report`）下次造訪即重抓 DB，並讓 client Router Cache 立即失效。
+  - 說明：上述前台頁面本就已是 `export const dynamic = "force-dynamic"`（自 v1.1.0 起），理論上不吃 Full Route Cache；此次為 belt-and-suspenders，未更動任何篩選邏輯（`active=true`、`parent` 對應等）與 RLS。
+
 ## [1.3.1] - 2026-06-18
 ### 變更 Changed
 - 後台「選項管理」四個區塊顯示順序調整為：學制 → 指標歸組 → 活動大類 → 活動類型（僅調整 JSX 區塊順序，邏輯、API、DB 不變）。
